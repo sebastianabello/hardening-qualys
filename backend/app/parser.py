@@ -1,144 +1,108 @@
-from __future__ import annotations
-from pathlib import Path
-from typing import Iterator, Tuple, Dict, Any
 import csv
 import io
-import zipfile
+from pathlib import Path
+from typing import List, Tuple, Dict
 
-# Parseo robusto de reportes Qualys (CSV o ZIP con CSVs) sin esquema fijo.
-# Reglas clave:
-#  - Tabla 1: detectar el encabezado "Control Statistics"; la línea inmediatamente siguiente define columnas.
-#  - Tabla 2: detectar el marcador "RESULTS"; la línea siguiente define columnas.
-#  - Añadir columna "Cliente" con el nombre de cliente proporcionado (o por defecto) en todos los documentos.
+# Palabras para detectar "ajustada" (cabecera o primeras líneas)
+AJUSTADA_TOKENS = ("AJUSTA", "AJUSTADA", "AJU")
 
-Markers = {
-    "control": "Control Statistics",
-    "results": "RESULTS",
-}
+def _norm(s: str) -> str:
+    return s.strip().strip('"').strip("'")
 
-class QualysParser:
-    def __init__(self, client: str, run_id: str) -> None:
-        self.client = client or "DEFAULT"
-        self.run_id = run_id
-        self.manifest_docs: list[dict[str, Any]] = []
-        self.error_docs: list[dict[str, Any]] = []
+def _is_marker(line: str, target: str) -> bool:
+    return _norm(line).upper() == target.upper()
 
-    def parse_input(self, path: Path) -> Tuple[list[dict], list[dict]]:
-        control_rows: list[dict] = []
-        result_rows: list[dict] = []
+def _detect_delimiter(sample_line: str) -> str:
+    # simple: cuenta comas vs punto y coma
+    c, sc = sample_line.count(","), sample_line.count(";")
+    if sc > c:
+        return ";"
+    return ","
 
-        if path.suffix.lower() == ".zip":
-            with zipfile.ZipFile(path, "r") as z:
-                for name in z.namelist():
-                    if not name.lower().endswith(".csv"):  # ignorar no-CSV
-                        continue
-                    data = z.read(name)
-                    control, results = self._parse_csv_bytes(data, source=f"{path.name}:{name}")
-                    control_rows.extend(control)
-                    result_rows.extend(results)
-                    self._add_manifest_entry(path.name, name, len(data))
-        else:
-            data = path.read_bytes()
-            control, results = self._parse_csv_bytes(data, source=path.name)
-            control_rows.extend(control)
-            result_rows.extend(results)
-            self._add_manifest_entry(path.name, None, len(data))
+def detect_ajustada(lines: List[str]) -> bool:
+    head = " ".join(lines[:5]).upper()
+    return any(tok in head for tok in AJUSTADA_TOKENS)
 
-        return control_rows, result_rows
+def detect_cliente(lines: List[str], empresas: List[str], nombre_defecto: str) -> str:
+    head = " ".join(lines[:5]).lower()
+    for e in empresas:
+        if e.lower() in head:
+            return e
+    return nombre_defecto
 
-    def _add_manifest_entry(self, archive: str, member: str | None, size_bytes: int) -> None:
-        self.manifest_docs.append({
-            "type": "source_file",
-            "archive": archive,
-            "member": member,
-            "size_bytes": size_bytes,
-            "run_id": self.run_id,
-            "Cliente": self.client,
-        })
+def _extract_table(lines: List[str], marker: str) -> Tuple[List[Dict[str, str]], List[str]]:
+    """
+    Busca una línea cuyo contenido normalizado sea `marker`, toma la
+    siguiente línea no vacía como encabezado, y luego filas hasta línea vacía
+    o próximo marcador conocido.
+    Devuelve (rows, columns)
+    """
+    n = len(lines)
+    start_idx = None
+    for i in range(n):
+        if _is_marker(lines[i], marker):
+            start_idx = i
+            break
+    if start_idx is None:
+        return [], []
 
-    def _parse_csv_bytes(self, data: bytes, source: str) -> Tuple[list[dict], list[dict]]:
-        # Manejar BOM y asegurar texto
-        text = data.decode("utf-8-sig", errors="replace")
-        lines = io.StringIO(text)
+    # Header = próxima línea no vacía
+    hdr_idx = None
+    for j in range(start_idx + 1, n):
+        if lines[j].strip():
+            hdr_idx = j
+            break
+    if hdr_idx is None:
+        return [], []
 
-        control_rows: list[dict] = []
-        result_rows: list[dict] = []
+    delim = _detect_delimiter(lines[hdr_idx])
+    reader = csv.reader(io.StringIO(lines[hdr_idx]), delimiter=delim)
+    columns = next(reader, [])
+    columns = [_norm(c) for c in columns]
+    if not columns:
+        return [], []
 
-        # Vamos leyendo línea a línea para detectar marcadores y luego usar csv.DictReader
-        buffer: list[str] = []
-        mode: str | None = None  # 'control' o 'results'
-        headers: list[str] | None = None
+    # Datos hasta línea vacía o hasta encontrar otro marcador común
+    stop_markers = ("RESULTS", "CONTROL STATISTICS", "ASSET TAGS", "SUMMARY")
+    data_lines: List[str] = []
+    for k in range(hdr_idx + 1, n):
+        ln = lines[k]
+        if not ln.strip():
+            break
+        if _norm(ln).upper() in stop_markers:
+            break
+        data_lines.append(ln)
 
-        def flush_buffer_to_rows():
-            nonlocal buffer, headers, mode, control_rows, result_rows
-            if not headers or not mode or not buffer:
-                buffer = []
-                return
-            # Usa csv.DictReader sobre el bloque acumulado
-            reader = csv.DictReader(io.StringIO("\n".join([",".join(headers)] + buffer)))
-            for i, row in enumerate(reader):
-                # Filtrar filas vacías
-                if not any((v or "").strip() for v in row.values()):
-                    continue
-                doc = {k.strip(): (v.strip() if isinstance(v, str) else v) for k, v in row.items()}
-                doc["Cliente"] = self.client
-                doc["run_id"] = self.run_id
-                doc["source"] = source
-                if mode == "control":
-                    control_rows.append(doc)
-                elif mode == "results":
-                    result_rows.append(doc)
-            buffer = []
+    rows: List[Dict[str, str]] = []
+    rdr = csv.reader(io.StringIO("\n".join(data_lines)), delimiter=delim)
+    for row in rdr:
+        # tolerante: si falta/n sobra(n) columnas, recorta o rellena
+        if len(row) < len(columns):
+            row = list(row) + [""] * (len(columns) - len(row))
+        elif len(row) > len(columns):
+            row = row[:len(columns)]
+        obj = {columns[i]: _norm(row[i]) for i in range(len(columns))}
+        rows.append(obj)
 
-        for raw_line in lines:
-            line = raw_line.strip("\n\r")
-            # Detección de marcadores exactos o entrecomillados (primera celda)
-            first_cell = next(csv.reader([line]))[0] if line else ""
-            normalized = first_cell.strip().strip('"').upper()
+    return rows, columns
 
-            if normalized == Markers["control"].upper():
-                # Flushear cualquier bloque anterior
-                flush_buffer_to_rows()
-                mode = "control"
-                headers = None
-                continue
+def parse_csv_file(path: Path, empresas: List[str], nombre_defecto: str) -> Tuple[bool, str, List[Dict], List[str], List[Dict], List[str]]:
+    """
+    Devuelve:
+      es_ajustada, cliente_detectado, t1_rows, t1_cols, t2_rows, t2_cols
+    """
+    text = path.read_text(encoding="utf-8", errors="ignore")
+    lines = text.splitlines()
+    es_ajustada = detect_ajustada(lines)
+    cliente = detect_cliente(lines, empresas, nombre_defecto)
 
-            if normalized == Markers["results"].upper():
-                flush_buffer_to_rows()
-                mode = "results"
-                headers = None
-                continue
+    t1_rows, t1_cols = _extract_table(lines, "Control Statistics")
+    t2_rows, t2_cols = _extract_table(lines, "RESULTS")
 
-            # Si estamos justo después de un marcador, la primera línea no vacía es el header
-            if mode and headers is None:
-                if line.strip() == "":
-                    continue
-                headers = [h.strip().strip('"') for h in next(csv.reader([line]))]
-                # Normalizar nombres de columnas duplicadas o vacías
-                seen: dict[str, int] = {}
-                norm_headers: list[str] = []
-                for h in headers:
-                    key = h or "col"
-                    count = seen.get(key, 0)
-                    seen[key] = count + 1
-                    norm_headers.append(key if count == 0 else f"{key}_{count}")
-                headers = norm_headers
-                continue
+    # Añade Cliente a cada fila (se respeta estructura original)
+    for r in t1_rows:
+        r["Cliente"] = cliente
+    for r in t2_rows:
+        r["Cliente"] = cliente
 
-            # Estamos dentro de un bloque, acumulamos líneas hasta que venga un marcador o un separador fuerte
-            if mode and headers:
-                # Un separador fuerte puede ser línea vacía que detiene la tabla
-                if line.strip() == "":
-                    flush_buffer_to_rows()
-                    mode = None
-                    headers = None
-                else:
-                    buffer.append(line)
-            else:
-                # Líneas fuera de bloques: ignorar
-                continue
-
-        # Fin de archivo: flushear
-        flush_buffer_to_rows()
-
-        return control_rows, result_rows
+    return es_ajustada, cliente, t1_rows, t1_cols + (["Cliente"] if "Cliente" not in t1_cols else []), t2_rows, t2_cols + (["Cliente"] if "Cliente" not in t2_cols else [])
