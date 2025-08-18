@@ -8,7 +8,6 @@ from uuid import uuid4
 import json
 import shutil
 import zipfile
-
 from .config import settings
 from .models import RunInfo, ProcessResponse, Artifact, IngestResult
 from .parser import parse_csv_file
@@ -17,9 +16,13 @@ from .ingest import ingest_run_folder
 
 app = FastAPI(title="Qualys Hardening Backend", default_response_class=JSONResponse)
 
+allow_origin_regex = ".*" if settings.CORS_ALLOW_ALL else None
+allow_origins = [] if settings.CORS_ALLOW_ALL else settings.ALLOWED_ORIGINS
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS,
+    allow_origins=allow_origins,
+    allow_origin_regex=allow_origin_regex,  # 👈 habilita cualquier host
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

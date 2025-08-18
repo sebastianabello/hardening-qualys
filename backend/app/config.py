@@ -9,6 +9,7 @@ class Settings(BaseSettings):
 
     OUTPUT_BASE_DIR: str = "./data"
     ALLOWED_ORIGINS: List[str] = ["http://localhost:5173"]
+    CORS_ALLOW_ALL: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False)
 
