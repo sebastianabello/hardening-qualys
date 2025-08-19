@@ -96,7 +96,7 @@ def parse_csv_file(path: Path, empresas: List[str], nombre_defecto: str) -> Tupl
     es_ajustada = detect_ajustada(lines)
     cliente = detect_cliente(lines, empresas, nombre_defecto)
 
-    t1_rows, t1_cols = _extract_table(lines, "Control Statistics")
+    t1_rows, t1_cols = _extract_table(lines, "Control Statistics (Percentage of Hosts Passed per Control)")
     t2_rows, t2_cols = _extract_table(lines, "RESULTS")
 
     # Añade Cliente a cada fila (se respeta estructura original)

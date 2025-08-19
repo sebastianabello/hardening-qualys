@@ -182,12 +182,9 @@ export default function App() {
       </section>
 
       {/* Carga de archivos + procesar */}
-      <div className="grid md:grid-cols-3 gap-4">
-        <div className="md:col-span-2">
-          <UploadArea onAddFiles={addFiles} />
-        </div>
+      <div className="grid md:grid-cols-4 gap-4">
 
-        <div className="bg-white rounded-2xl shadow-sm p-4 space-y-2">
+        <div className="md:col-span-3 bg-white rounded-2xl shadow-sm p-4 space-y-2">
           {/* header + botón limpiar */}
           <div className="flex items-center justify-between">
             <div className="text-sm text-slate-700">
@@ -209,13 +206,13 @@ export default function App() {
           </div>
 
           {/* contenedor con scroll */}
-          <div className="max-h-56 md:max-h-64 overflow-y-auto pr-1">
-            <ul className="flex flex-wrap gap-2 text-sm text-slate-700">
+          <div className="max-h-32 md:max-h-32 overflow-y-auto pr-1">
+            <ul className="flex flex-col flex-wrap gap-2 text-sm text-slate-700">
               {selected.map(f => {
                 const k = `${f.name}-${f.size}-${(f as any).lastModified}`
                 return (
                   <li key={k} className="px-2 py-1 bg-slate-100 rounded-xl flex items-center gap-2">
-                    <span className="truncate max-w-[22rem]">{f.name}</span>
+                    <span className="">{f.name}</span>
                     <button
                       type="button"
                       className="text-slate-500 hover:text-red-600"
@@ -238,6 +235,10 @@ export default function App() {
             {processing ? "Procesando…" : "Procesar"}
           </button>
         </div>
+        <div className="md:col-span-1">
+          <UploadArea onAddFiles={addFiles} />
+        </div>
+
       </div>
 
       {notice && (
@@ -293,7 +294,7 @@ export default function App() {
         </>
       )}
 
-      <footer className="text-center text-slate-500 text-xs">FS storage • sin BD • © Qualys Hardening</footer>
+      <footer className="text-center text-slate-500 text-xs">© Desarrollado por Juan Abello</footer>
     </div>
   )
 }

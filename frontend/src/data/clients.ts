@@ -7,23 +7,28 @@ export type Client = {
 // Ejemplo inicial (ajustar libremente)
 export const CLIENTS: Client[] = [
   {
-    id: "acme",
-    name: "ACME",
-    empresas: ["ACME", "ACME S.A.", "ACME Corp"]
+    id: "occidente",
+    name: "occidente",
+    empresas: []
   },
   {
-    id: "banconia",
-    name: "Banconia",
-    empresas: ["Banconia", "Banconia Bank", "BANCONIA SA"]
+    id: "fiduoccidente",
+    name: "fiduoccidente",
+    empresas: []
   },
   {
-    id: "contoso",
-    name: "Contoso",
+    id: "segurosalfa",
+    name: "seguros-alfa",
     empresas: ["Contoso", "Contoso Ltd.", "CONTOSO S.A."]
   },
   {
-    id: "bigco",
-    name: "BigCo",
-    empresas: ["BigCo", "BigCo Ltd.", "BIGCO S.A."]
+    id: "porvenir",
+    name: "porvenir",
+    empresas: []
+  },
+  {
+    id: "enlace",
+    name: "enlace",
+    empresas: ["CEO","PROMIGAS","GDO","PROMIGAS","PROMIPER","SURTIGAS"]
   }
 ]
