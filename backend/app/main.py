@@ -10,8 +10,10 @@ import shutil
 import zipfile
 from .config import settings
 from .models import RunInfo, ProcessResponse, Artifact, IngestResult
-from .parser import parse_csv_file
-from .excel_outputs import guardar_cuatro_excels
+#from .parser import parse_csv_file
+#from .excel_outputs import guardar_cuatro_excels
+from .parser_stream import stream_tables
+from .excel_stream import ExcelAggregator
 from .ingest import ingest_run_folder
 
 app = FastAPI(title="Qualys Hardening Backend", default_response_class=JSONResponse)
