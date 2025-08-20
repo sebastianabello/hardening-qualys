@@ -183,8 +183,10 @@ export default function App() {
 
       {/* Carga de archivos + procesar */}
       <div className="grid md:grid-cols-4 gap-4">
-
-        <div className="md:col-span-3 bg-white rounded-2xl shadow-sm p-4 space-y-2">
+        <div className="md:col-span-2">
+          <UploadArea onAddFiles={addFiles} />
+        </div>
+        <div className="md:col-span-2 bg-white rounded-2xl shadow-sm p-4 space-y-2">
           {/* header + botón limpiar */}
           <div className="flex items-center justify-between">
             <div className="text-sm text-slate-700">
@@ -235,10 +237,6 @@ export default function App() {
             {processing ? "Procesando…" : "Procesar"}
           </button>
         </div>
-        <div className="md:col-span-1">
-          <UploadArea onAddFiles={addFiles} />
-        </div>
-
       </div>
 
       {notice && (
