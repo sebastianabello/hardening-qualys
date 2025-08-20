@@ -1,10 +1,26 @@
 from __future__ import annotations
 from pathlib import Path
+import csv
 from typing import Dict, Iterator
 import json
 import httpx
 from openpyxl import load_workbook
 from .config import settings
+from itertools import chain
+
+def _iter_csv_docs(csv_path: Path):
+    import json
+    with csv_path.open("r", encoding="utf-8", newline="", errors="ignore") as f:
+        rdr = csv.reader(f)
+        headers = next(rdr, None)
+        if not headers:
+            return
+        headers = [str(h) if h is not None else "" for h in headers]
+        for row in rdr:
+            obj = {}
+            for i, h in enumerate(headers):
+                obj[h] = "" if i >= len(row) or row[i] is None else row[i]
+            yield json.dumps(obj, ensure_ascii=False)
 
 
 def _iter_excel_docs(xlsx_path: Path) -> Iterator[str]:
@@ -52,50 +68,47 @@ async def ingest_run_folder(run_output_dir: Path) -> Dict[str, int]:
 
     # Si quieres soportar TLS no verificado, añade verify=settings.ES_VERIFY_TLS en config
     async with httpx.AsyncClient(timeout=120.0) as client:
-        for x in sorted(run_output_dir.glob("*.xlsx")):
+        files = list(chain(sorted(run_output_dir.glob("*.xlsx")),
+                           sorted(run_output_dir.glob("*.csv"))))
+
+        for x in files:
             index, ajustada = _guess_targets(x.name)
 
-            buf_lines: list[str] = []
+            if x.suffix.lower() == ".csv":
+                iter_docs = _iter_csv_docs(x)
+            else:
+                iter_docs = _iter_excel_docs(x)
+
+            buf_lines = []
             buf_bytes = 0
-            sent_ok = 0
+            sent = 0
 
             async def flush():
-                nonlocal buf_lines, buf_bytes, sent_ok
+                nonlocal buf_lines, buf_bytes, sent
                 if not buf_lines:
                     return
                 data = ("\n".join(buf_lines) + "\n").encode("utf-8")
                 resp = await client.post(f"{settings.ES_BASE_URL}/_bulk", content=data, headers=headers)
                 resp.raise_for_status()
                 res = resp.json()
-
-                # cuenta items indexados (status 2xx)
                 items = res.get("items", [])
-                sent_ok += sum(1 for it in items if "index" in it and 200 <= it["index"].get("status", 500) < 300)
+                sent += sum(1 for it in items if "index" in it and 200 <= it["index"].get("status", 500) < 300)
+                buf_lines, buf_bytes = [], 0
 
-                # limpia buffer
-                buf_lines = []
-                buf_bytes = 0
-
-            # Construcción del NDJSON en memoria por lotes
-            for doc_line in _iter_excel_docs(x):
+            for doc_line in iter_docs:
                 d = json.loads(doc_line)
-                # inyecta 'ajustada' si no viene
                 if "ajustada" not in d:
                     d["ajustada"] = ajustada
+                doc_line = json.dumps(d, ensure_ascii=False)
 
-                # acción + doc
                 buf_lines.append(json.dumps({"index": {"_index": index}}, ensure_ascii=False))
-                body = json.dumps(d, ensure_ascii=False)
-                buf_lines.append(body)
+                buf_lines.append(doc_line)
                 buf_bytes += len(buf_lines[-1]) + len(buf_lines[-2]) + 2
 
-                # umbrales de flush (bytes o líneas)
                 if buf_bytes >= 5_000_000 or len(buf_lines) >= 10_000:
                     await flush()
 
-            # último flush
             await flush()
-
-            count_by_index[index] = count_by_index.get(index, 0) + sent_ok
+            count_by_index[index] = count_by_index.get(index, 0) + sent
 
     return count_by_index

@@ -177,7 +177,9 @@ def download_artifact(run_id: str, filename: str):
     p = RUNS_DIR / run_id / "output" / filename
     if not p.exists():
         raise HTTPException(status_code=404, detail="Archivo no encontrado")
-    return FileResponse(p, filename=filename, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    mime = "text/csv" if filename.lower().endswith(".csv") \
+           else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    return FileResponse(p, filename=filename, media_type=mime)
 
 @app.post("/api/runs/{run_id}/ingest", response_model=IngestResult)
 async def ingest_run(run_id: str):
