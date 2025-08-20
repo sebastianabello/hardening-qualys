@@ -1,7 +1,7 @@
 from __future__ import annotations
 from pathlib import Path
 from typing import Iterator, Tuple, List, Dict
-import csv, io, re
+import csv, io
 
 AJUSTADA_TOKENS = ("AJUSTA", "AJUSTADA", "AJU")
 
@@ -14,33 +14,9 @@ def _is_marker(line: str, target: str) -> bool:
 def _detect_delimiter(sample: str) -> str:
     return ";" if sample.count(";") > sample.count(",") else ","
 
-def _extract_os(head_text: str) -> str | None:
-    """
-    Extrae el nombre de SO desde textos tipo:
-      - "CIS Benchmark for Microsoft Windows server 2003 v3.1.0 ..."
-      - "CIS IBM AIX 7.3 Benchmark v1.1.0 ..."
-    Devuelve:
-      - "Microsoft Windows server 2003"
-      - "IBM AIX 7.3"
-    """
-    patterns = [
-        r"CIS\s+Benchmark\s+for\s+(.+?)\s+v\d",          # ... Benchmark for <OS> vX
-        r"CIS\s+(.+?)\s+Benchmark\s+v\d",                # CIS <OS> Benchmark vX
-        r"CIS\s+Benchmark\s+for\s+(.+?)\s+version\s+\d", # ... Benchmark for <OS> version X
-        r"CIS\s+(.+?)\s+Benchmark\s+version\s+\d",       # CIS <OS> Benchmark version X
-    ]
-    for pat in patterns:
-        m = re.search(pat, head_text, flags=re.IGNORECASE)
-        if m:
-            os_name = m.group(1).strip()
-            os_name = re.sub(r"\s+", " ", os_name)
-            return os_name
-    return None
-
-def _detect_head(path: Path, empresas: List[str], nombre_defecto: str) -> Tuple[bool, str, str | None]:
+def _detect_head(path: Path, empresas: List[str], nombre_defecto: str) -> Tuple[bool, str]:
     es_ajustada = False
     cliente = nombre_defecto
-    os_name: str | None = None
     with path.open("r", encoding="utf-8", errors="ignore", newline="") as f:
         head = []
         for _ in range(5):
@@ -48,37 +24,39 @@ def _detect_head(path: Path, empresas: List[str], nombre_defecto: str) -> Tuple[
             if not ln: break
             head.append(ln)
         head_join = " ".join(head)
-
         es_ajustada = any(tok in head_join.upper() for tok in AJUSTADA_TOKENS)
         low = head_join.lower()
         for e in empresas:
             if e.lower() in low:
                 cliente = e
                 break
+    return es_ajustada, cliente
 
-        os_name = _extract_os(head_join)
-    return es_ajustada, cliente, os_name
-
-def stream_tables(path: Path, empresas: List[str], nombre_defecto: str) -> Iterator[Tuple[str, bool, Dict[str,str], List[str], str | None]]:
+def stream_tables(path: Path, empresas: List[str], nombre_defecto: str) -> Iterator[Tuple[str, bool, Dict[str,str], List[str]]]:
     """
-    Emite tuplas (table, es_ajustada, row_dict, header_cols, os_name)
+    Emite tuplas (table, es_ajustada, row_dict, header_cols)
       table in {"t1","t2"}
     """
-    es_ajustada, cliente, os_name = _detect_head(path, empresas, nombre_defecto)
+    es_ajustada, cliente = _detect_head(path, empresas, nombre_defecto)
 
     with path.open("r", encoding="utf-8", errors="ignore", newline="") as f:
+        n = 0
         while True:
+            pos = f.tell()
             line = f.readline()
             if not line: break
+            n += 1
 
+            # Buscar T1 o T2
             is_t1 = _is_marker(line, "Control Statistics")
             is_t2 = _is_marker(line, "RESULTS")
             if not (is_t1 or is_t2):
                 continue
 
-            # Header = próxima línea no vacía
+            # Header: próxima línea no vacía
             hdr = ""
             while True:
+                pos2 = f.tell()
                 l2 = f.readline()
                 if not l2: break
                 if l2.strip():
@@ -90,27 +68,35 @@ def stream_tables(path: Path, empresas: List[str], nombre_defecto: str) -> Itera
             delim = _detect_delimiter(hdr)
             columns = next(csv.reader([hdr], delimiter=delim), [])
             columns = [_norm(c) for c in columns]
+            # Asegura columna Cliente
             if "Cliente" not in columns:
-                columns.append("Cliente")  # añadimos Cliente en dataset
+                columns.append("Cliente")
 
+            # Iterador de datos hasta línea vacía o próximo marcador
             def data_iter():
+                nonlocal f
                 while True:
                     p = f.tell()
                     ln = f.readline()
-                    if not ln or not ln.strip():
+                    if not ln:
+                        break
+                    if not ln.strip():
                         break
                     if _is_marker(ln, "RESULTS") or _is_marker(ln, "Control Statistics") or _norm(ln).upper() in ("ASSET TAGS","SUMMARY"):
+                        # retrocede para que el for externo procese el marcador
                         f.seek(p)
                         break
                     yield ln
 
             rdr = csv.reader(data_iter(), delimiter=delim)
             for row in rdr:
-                # tamaño vs columnas (tolerante)
-                need = len(columns) - 1  # sin "Cliente"
-                if len(row) < need: row = list(row) + [""] * (need - len(row))
-                elif len(row) > need: row = row[:need]
+                # normaliza tamaño vs columnas (tolerante)
+                if len(row) < len(columns)-1:  # -1 porque añadimos "Cliente" quizá
+                    row = list(row) + [""] * (len(columns)-1 - len(row))
+                elif len(row) > len(columns)-1:
+                    row = row[:len(columns)-1]
 
-                obj = {columns[i]: _norm(row[i]) for i in range(need)}
+                obj = {columns[i]: _norm(row[i]) for i in range(len(columns)-1)}
                 obj["Cliente"] = cliente
-                yield ("t1" if is_t1 else "t2", es_ajustada, obj, columns, os_name)
+
+                yield ("t1" if is_t1 else "t2", es_ajustada, obj, columns)

@@ -108,19 +108,10 @@ async def process_files(
         elif filename.lower().endswith(".csv"):
             saved_csvs.append(dest)
 
+    # Procesar CSVs
     for csv_path in saved_csvs:
         try:
-            es_aj, cliente_arch, t1_rows, t1_cols, t2_rows, t2_cols, os_name = parse_csv_file(
-                csv_path, empresas_list, nombre_defecto or client
-            )
-
-            # ⬇ añade la columna 'os' a cada fila si se detectó
-            if os_name:
-                for r in t1_rows:
-                    r["os"] = os_name
-                for r in t2_rows:
-                    r["os"] = os_name
-
+            es_aj, cliente_arch, t1_rows, t1_cols, t2_rows, t2_cols = parse_csv_file(csv_path, empresas_list, nombre_defecto or client)
             # columnas maestras: preserva orden del primer archivo que traiga columnas
             if t1_rows and not t1_cols_master:
                 t1_cols_master = t1_cols
@@ -136,7 +127,6 @@ async def process_files(
                 (t2_ajustada_rows if es_aj else t2_normal_rows).extend(t2_rows)
             else:
                 warnings.append(f"{csv_path.name}: 'RESULTS' no encontrada o vacía")
-
         except Exception as ex:
             warnings.append(f"{csv_path.name}: error de parseo: {ex}")
 

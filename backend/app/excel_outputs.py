@@ -22,8 +22,6 @@ def _write_csv(rows, columns, out_path: Path, scan_name: str, periodo: str):
     out_path.parent.mkdir(parents=True, exist_ok=True)
     # header (+ columnas extra)
     header = list(columns)
-    if "os" not in header:
-        header.append("os")
     if "scan_name" not in header:
         header.append("scan_name")
     if "periodo" not in header:
@@ -34,7 +32,6 @@ def _write_csv(rows, columns, out_path: Path, scan_name: str, periodo: str):
         w.writerow(header)
         for r in rows:
             row = [r.get(c, "") for c in columns]
-            row.append(r.get("os",""))
             row.append(scan_name)
             row.append(periodo)
             w.writerow(row)

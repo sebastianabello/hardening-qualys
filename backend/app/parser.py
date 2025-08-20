@@ -2,8 +2,6 @@ import csv
 import io
 from pathlib import Path
 from typing import List, Tuple, Dict
-import re
-from typing import Optional
 
 # Palabras para detectar "ajustada" (cabecera o primeras líneas)
 AJUSTADA_TOKENS = ("AJUSTA", "AJUSTADA", "AJU")
@@ -108,25 +106,3 @@ def parse_csv_file(path: Path, empresas: List[str], nombre_defecto: str) -> Tupl
         r["Cliente"] = cliente
 
     return es_ajustada, cliente, t1_rows, t1_cols + (["Cliente"] if "Cliente" not in t1_cols else []), t2_rows, t2_cols + (["Cliente"] if "Cliente" not in t2_cols else [])
-
-def _extract_os(head_text: str) -> Optional[str]:
-    """
-    Ejemplos de entrada:
-      - "CIS Benchmark for Microsoft Windows server 2003 v3.1.0 ..."
-      - "CIS IBM AIX 7.3 Benchmark v1.1.0 ..."
-    Salida:
-      - "Microsoft Windows server 2003"
-      - "IBM AIX 7.3"
-    """
-    patterns = [
-        r"CIS\s+Benchmark\s+for\s+(.+?)\s+v\d",          # ... Benchmark for <OS> vX
-        r"CIS\s+(.+?)\s+Benchmark\s+v\d",                # CIS <OS> Benchmark vX
-        r"CIS\s+Benchmark\s+for\s+(.+?)\s+version\s+\d", # ... Benchmark for <OS> version X
-        r"CIS\s+(.+?)\s+Benchmark\s+version\s+\d",
-    ]
-    for pat in patterns:
-        m = re.search(pat, head_text, flags=re.IGNORECASE)
-        if m:
-            os_name = m.group(1).strip()
-            return re.sub(r"\s+", " ", os_name)
-    return None

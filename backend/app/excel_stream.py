@@ -31,12 +31,11 @@ class _XlsxWriter:
         self.wb = Workbook(write_only=True)
         self.ws = self.wb.create_sheet(title="data")
         # header: columnas + extras
-        header = self.header_cols + ["scan_name", "periodo", "os"]
+        header = self.header_cols + ["scan_name", "periodo"]
         self.ws.append(header)
 
-    def append(self, row: Dict[str, str], os_value: str | None):
+    def append(self, row: Dict[str, str]):
         data = [row.get(c, "") for c in self.header_cols]
-        data.append(os_value or "")
         data.append(self.scan_name)
         data.append(self.periodo)
         self.ws.append(data)
@@ -95,16 +94,13 @@ class ExcelAggregator:
                 self.w_t2_norm = _XlsxWriter(path, self.t2_cols, scan_name, periodo)
             return self.w_t2_aj if ajustada else self.w_t2_norm
 
-    def add_row(self, table: str, ajustada: bool, row: Dict[str,str], header_cols: List[str], os_value: str | None):
+    def add_row(self, table: str, ajustada: bool, row: Dict[str,str], header_cols: List[str]):
         w = self._ensure_writer(table, ajustada, header_cols)
-        w.append(row, os_value)
+        w.append(row)
         key = f"{'t1' if table=='t1' else 't2'}_{'ajustada' if ajustada else 'normal'}"
         self.counts[key] += 1
-        # Para la previa, incluimos también 'os'
         if len(self.preview[key]) < self.preview_limit:
-            r2 = dict(row)
-            r2["os"] = os_value or ""
-            self.preview[key].append(r2)
+            self.preview[key].append(row)
 
     def close(self):
         for w in [self.w_t1_norm, self.w_t1_aj, self.w_t2_norm, self.w_t2_aj]:
