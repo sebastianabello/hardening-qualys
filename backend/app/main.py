@@ -111,8 +111,13 @@ async def process_files(
     # Procesar CSVs
     for csv_path in saved_csvs:
         try:
-            es_aj, cliente_arch, t1_rows, t1_cols, t2_rows, t2_cols = parse_csv_file(csv_path, empresas_list, nombre_defecto or client)
+            es_aj, cliente_arch, t1_rows, t1_cols, t2_rows, t2_cols, os_name = parse_csv_file(
+                csv_path, empresas_list, nombre_defecto or client
+            )
             # columnas maestras: preserva orden del primer archivo que traiga columnas
+            if os_name:
+                for r in t1_rows: r.setdefault("os", os_name)
+                for r in t2_rows: r.setdefault("os", os_name)
             if t1_rows and not t1_cols_master:
                 t1_cols_master = t1_cols
             if t2_rows and not t2_cols_master:
