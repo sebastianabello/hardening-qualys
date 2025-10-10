@@ -4,6 +4,8 @@ from typing import List
 class Settings(BaseSettings):
     ES_BASE_URL: str = "http://localhost:9200"
     ES_API_KEY: str | None = None
+    CSV_PART_MAX_ROWS: int = 1_000_000
+    CSV_GZIP: bool = False
     ES_INDEX_CONTROL: str = "qualys-control-stats"
     ES_INDEX_RESULTS: str = "qualys-results"
 

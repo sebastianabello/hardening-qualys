@@ -1,12 +1,16 @@
 from __future__ import annotations
-import csv
+import csv, re, sys
 import io
 from pathlib import Path
 from typing import List, Tuple, Dict, Optional
-import re
 
 # Palabras para detectar "ajustada" (cabecera o primeras líneas)
 AJUSTADA_TOKENS = ("AJUSTA", "AJUSTADA", "AJU")
+
+try:
+    csv.field_size_limit(10 * 1024 * 1024)
+except Exception:
+    csv.field_size_limit(min(sys.maxsize, 2_147_483_647))
 
 def _norm(s: str) -> str:
     return s.strip().strip('"').strip("'")

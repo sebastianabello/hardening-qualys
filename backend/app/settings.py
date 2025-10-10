@@ -8,13 +8,22 @@ class Settings(BaseSettings):
     UPLOADS_DIRNAME: str = "uploads"
     OUTPUTS_DIRNAME: str = "outputs"
 
-    # Defaults para ES (pueden sobreescribirse en el POST /ingest)
-    ES_BASE_URL: str | None = None  # ej: https://es.example.com
-    ES_API_KEY: str | None = None   # apiKey Base64
+    # Configuración adicional
+    OUTPUT_BASE_DIR: str = "./data"
+    CORS_ALLOW_ALL: bool = True
+    ALLOWED_ORIGINS: list[str] = []
+    CSV_PART_MAX_ROWS: int = 1000000
+    CSV_GZIP: bool = False
+    BATCH_SIZE: int = 1000
+
+    # Configuración de Elasticsearch
+    ES_BASE_URL: str | None = None      # URL del cluster de Elasticsearch
+    ES_API_KEY: str | None = None       # API Key de Elasticsearch
+    ES_VERIFY_CERTS: bool = False       # Verificar certificados SSL
 
     # Nombres de índices por defecto
-    ES_INDEX_CONTROL_STATS: str = "qualys-control-stats"
-    ES_INDEX_RESULTS: str = "qualys-results"
+    ES_INDEX_CONTROL: str = "qualys-control-stats"
+    ES_INDEX_RESULTS: str = "qualys-results" 
     ES_INDEX_MANIFEST: str = "qualys-manifest"
     ES_INDEX_ERRORS: str = "qualys-errors"
 

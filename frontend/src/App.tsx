@@ -2,7 +2,7 @@ import React from "react"
 import UploadArea from "./components/UploadArea"
 import PreviewTable from "./components/PreviewTable"
 import ArtifactsIngestPanel from "./components/ArtifactsPanel"
-import { processFiles, ingest } from "./lib/api"
+import { processFiles, processFilesAsync, waitForJobCompletion, ingest } from "./lib/api"
 import type { Artifact, ProcessResponse } from "./types"
 import { CLIENTS } from "./data/clients"
 
@@ -26,6 +26,15 @@ export default function App() {
   const [selected, setSelected] = React.useState<File[]>([])
   const [processing, setProcessing] = React.useState(false)
   const [resp, setResp] = React.useState<ProcessResponse | null>(null)
+  
+  // Estados para procesamiento asíncrono
+  const [jobId, setJobId] = React.useState<string | null>(null)
+  const [progress, setProgress] = React.useState("")
+  const [progressDetails, setProgressDetails] = React.useState<{
+    files_processed: number
+    total_files: number
+    current_file: string
+  } | null>(null)
 
   // Notificaciones
   const [error, setError] = React.useState<string | null>(null)
@@ -91,16 +100,64 @@ export default function App() {
     try {
       setError(null); setNotice(null); setIngestResult(null); setConfirmed(false)
       setProcessing(true)
+      setProgress("")
+      setProgressDetails(null)
+      setJobId(null)
+      
       const clientName = selectedClient?.name || "DEFAULT"
-      const r = await processFiles(selected, clientName, empresas, clientName)
-      setResp(r)
-      const c = r.run?.counts || {}
-      const total = (c.t1_normal || 0) + (c.t1_ajustada || 0) + (c.t2_normal || 0) + (c.t2_ajustada || 0)
-      setNotice(`Procesamiento OK · ${r.run.source_files.length} archivo(s) · ${total} fila(s)`)
+      
+      // Usar procesamiento asíncrono si hay muchos archivos (más de 5 para pruebas)
+      if (selected.length > 5) {
+        console.log(`🚀 Iniciando procesamiento asíncrono para ${selected.length} archivos`)
+        setNotice("Iniciando procesamiento asíncrono...")
+        
+        // Iniciar job asíncrono
+        console.log("📤 Enviando archivos al backend...")
+        const jobResponse = await processFilesAsync(selected, clientName, empresas, clientName)
+        console.log("✅ Job iniciado:", jobResponse)
+        
+        setJobId(jobResponse.job_id)
+        setNotice(`Procesamiento iniciado (Job: ${jobResponse.job_id})`)
+        
+        // Esperar completación con polling
+        console.log("🔄 Iniciando polling del job...")
+        const r = await waitForJobCompletion(
+          jobResponse.job_id,
+          (status) => {
+            // Actualizar progreso en tiempo real
+            console.log("📊 Actualización de progreso:", status)
+            setProgress(status.progress || "Procesando...")
+            setProgressDetails({
+              files_processed: status.files_processed,
+              total_files: status.total_files,
+              current_file: status.current_file
+            })
+          }
+        )
+        
+        console.log("🎉 Job completado:", r)
+        setResp(r)
+        const c = r.run?.counts || {}
+        const total = (c.t1_normal || 0) + (c.t1_ajustada || 0) + (c.t2_normal || 0) + (c.t2_ajustada || 0)
+        setNotice(`Procesamiento completado · ${r.run.source_files.length} archivo(s) · ${total} fila(s)`)
+        
+      } else {
+        // Usar procesamiento síncrono para pocos archivos
+        setNotice("Procesando archivos...")
+        const r = await processFiles(selected, clientName, empresas, clientName)
+        setResp(r)
+        const c = r.run?.counts || {}
+        const total = (c.t1_normal || 0) + (c.t1_ajustada || 0) + (c.t2_normal || 0) + (c.t2_ajustada || 0)
+        setNotice(`Procesamiento OK · ${r.run.source_files.length} archivo(s) · ${total} fila(s)`)
+      }
+      
     } catch (e: any) {
       setError(e?.message || String(e))
     } finally {
       setProcessing(false)
+      setProgress("")
+      setProgressDetails(null)
+      setJobId(null)
     }
   }
 
@@ -236,6 +293,80 @@ export default function App() {
           >
             {processing ? "Procesando…" : "Procesar"}
           </button>
+
+          {/* Sección de progreso */}
+          {processing && (
+            <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-xl space-y-2">
+              <div className="text-sm font-medium text-blue-900">
+                {jobId ? `Procesamiento asíncrono (Job: ${jobId})` : "Procesando..."}
+              </div>
+              
+              {progress && (
+                <div className="text-sm text-blue-700">{progress}</div>
+              )}
+              
+              {progressDetails && (
+                <div className="space-y-1">
+                  <div className="flex justify-between text-xs text-blue-600">
+                    <span>Progreso: {progressDetails.files_processed}/{progressDetails.total_files} archivos</span>
+                    <span>{Math.round((progressDetails.files_processed / progressDetails.total_files) * 100)}%</span>
+                  </div>
+                  
+                  {progressDetails.current_file && (
+                    <div className="text-xs text-blue-600 truncate">
+                      Procesando: {progressDetails.current_file}
+                    </div>
+                  )}
+                  
+                  <div className="w-full bg-blue-200 rounded-full h-2">
+                    <div 
+                      className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                      style={{ 
+                        width: `${Math.round((progressDetails.files_processed / progressDetails.total_files) * 100)}%` 
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          
+          {/* Progress indicator for async processing */}
+          {processing && (progress || progressDetails) && (
+            <div className="mt-3 space-y-2">
+              <div className="text-sm text-slate-700">
+                {progress}
+              </div>
+              {progressDetails && (
+                <div className="space-y-1">
+                  <div className="flex justify-between text-xs text-slate-600">
+                    <span>Archivos: {progressDetails.files_processed}/{progressDetails.total_files}</span>
+                    {progressDetails.total_files > 0 && (
+                      <span>{Math.round((progressDetails.files_processed / progressDetails.total_files) * 100)}%</span>
+                    )}
+                  </div>
+                  {progressDetails.total_files > 0 && (
+                    <div className="w-full bg-slate-200 rounded-full h-2">
+                      <div 
+                        className="bg-slate-900 h-2 rounded-full transition-all duration-500"
+                        style={{ 
+                          width: `${Math.min((progressDetails.files_processed / progressDetails.total_files) * 100, 100)}%` 
+                        }}
+                      />
+                    </div>
+                  )}
+                  {progressDetails.current_file && (
+                    <div className="text-xs text-slate-500 truncate">
+                      📄 {progressDetails.current_file}
+                    </div>
+                  )}
+                </div>
+              )}
+              {jobId && (
+                <div className="text-xs text-slate-400">Job ID: {jobId}</div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
