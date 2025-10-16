@@ -1,9 +1,12 @@
 from __future__ import annotations
 from pathlib import Path
 from datetime import datetime
-import calendar, csv, gzip
+import calendar, csv, gzip, subprocess, shutil
 from typing import List, Dict, Optional
 from .settings import settings
+import logging
+
+logger = logging.getLogger(__name__)
 
 MESES_ES = {1:"enero",2:"febrero",3:"marzo",4:"abril",5:"mayo",6:"junio",7:"julio",8:"agosto",9:"septiembre",10:"octubre",11:"noviembre",12:"diciembre"}
 
@@ -26,28 +29,68 @@ class _CsvWriter:
         self.periodo = periodo
         self.count = 0
         path.parent.mkdir(parents=True, exist_ok=True)
-        # gzip opcional con buffer optimizado
+        
+        # Compresión con pigz (paralelo) si está disponible
         if settings.CSV_GZIP:
-            self.fh = gzip.open(path, "wt", encoding="utf-8", newline="", compresslevel=1)  # Compresión rápida
+            # Intentar usar pigz para compresión paralela
+            if settings.ENABLE_PARALLEL_COMPRESSION and shutil.which("pigz"):
+                logger.info(f"🚀 Usando pigz (compresión paralela) para {path.name}")
+                # Crear proceso pigz
+                self.pigz_proc = subprocess.Popen(
+                    ['pigz', '-c', '-1', '-p', str(settings.WORKER_PROCESSES)],  # -1 = rápido, -p = threads
+                    stdin=subprocess.PIPE,
+                    stdout=open(path, 'wb'),
+                    stderr=subprocess.PIPE
+                )
+                self.fh = self.pigz_proc.stdin
+                self.using_pigz = True
+            else:
+                # Fallback a gzip estándar
+                logger.info(f"ℹ️ Usando gzip estándar para {path.name}")
+                self.fh = gzip.open(path, "wt", encoding="utf-8", newline="", compresslevel=1)
+                self.using_pigz = False
         else:
-            self.fh = path.open("w", encoding="utf-8", newline="", buffering=8192)  # Buffer de 8KB
+            # Sin compresión - buffer mucho más grande para escritura rápida
+            self.fh = path.open("w", encoding="utf-8", newline="", buffering=settings.WRITE_BUFFER_SIZE)
+            self.using_pigz = False
+        
         self.w = csv.writer(self.fh, quoting=csv.QUOTE_MINIMAL)
         header = self.cols + ["scan_name","periodo","os"]
         self.w.writerow(header)
+        self._row_buffer = []
+        self._buffer_size = 1000  # Escribir cada 1000 filas
 
     def append(self, row: Dict[str,str], os_value: Optional[str]):
         out = [row.get(c, "") for c in self.cols]
         out.append(self.scan_name)
         out.append(self.periodo)
         out.append(os_value or "")
-        self.w.writerow(out)
+        self._row_buffer.append(out)
         self.count += 1
+        
+        # Flush buffer cada N filas para mejor rendimiento
+        if len(self._row_buffer) >= self._buffer_size:
+            self._flush_buffer()
+    
+    def _flush_buffer(self):
+        if self._row_buffer:
+            self.w.writerows(self._row_buffer)
+            self._row_buffer.clear()
 
     def close(self):
         try:
+            self._flush_buffer()  # Flush cualquier fila pendiente
             self.fh.flush()
         finally:
-            self.fh.close()
+            if hasattr(self, 'using_pigz') and self.using_pigz:
+                # Cerrar pigz correctamente
+                self.fh.close()
+                self.pigz_proc.wait()
+                if self.pigz_proc.returncode != 0:
+                    stderr = self.pigz_proc.stderr.read()
+                    logger.warning(f"⚠️ pigz warning: {stderr}")
+            else:
+                self.fh.close()
 
 class CsvAggregator:
     """

@@ -54,7 +54,13 @@ def _iter_excel_docs(xlsx_path: Path) -> Iterator[str]:
 def _get_index_name_from_file(file_name: str) -> tuple[str, bool]:
     """
     Genera el nombre del índice basado en el nombre del archivo.
-    Usa la misma lógica que _nombre_base() para mantener consistencia.
+    IMPORTANTE: Remueve sufijos de partición (-part-XX) para que todos los archivos
+    particionados vayan al MISMO índice de Elasticsearch.
+    
+    Ejemplos:
+    - cliente-hardening-2024-enero-31.csv → cliente-hardening-2024-enero-31
+    - cliente-hardening-2024-enero-31-part-02.csv → cliente-hardening-2024-enero-31
+    - cliente-hardening-control-statics-2024-enero-31-ajustado-part-03.csv → cliente-hardening-control-statics-2024-enero-31-ajustado
     """
     import re
     from pathlib import Path
@@ -65,6 +71,10 @@ def _get_index_name_from_file(file_name: str) -> tuple[str, bool]:
     # Si termina en .csv (para archivos .csv.gz), quitarlo también
     if base_name.endswith('.csv'):
         base_name = base_name[:-4]
+    
+    # REMOVER sufijo de partición (-part-XX, -part-02, etc.)
+    # Esto asegura que todos los archivos particionados vayan al mismo índice
+    base_name = re.sub(r'-part-\d+$', '', base_name, flags=re.IGNORECASE)
     
     # Convertir el nombre del archivo a un índice válido para Elasticsearch
     # Mantener la estructura: cliente-hardening-[control-statics]-fecha[-ajustado]

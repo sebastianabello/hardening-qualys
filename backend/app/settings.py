@@ -15,6 +15,14 @@ class Settings(BaseSettings):
     CSV_PART_MAX_ROWS: int = 1000000
     CSV_GZIP: bool = False
     BATCH_SIZE: int = 1000
+    
+    # Configuración de rendimiento
+    WORKER_PROCESSES: int = 4  # Número de workers para procesamiento paralelo
+    CHUNK_SIZE_BYTES: int = 50 * 1024 * 1024  # 50MB chunks para lectura
+    WRITE_BUFFER_SIZE: int = 256 * 1024  # 256KB buffer de escritura
+    ENABLE_PARALLEL_COMPRESSION: bool = True  # Usar pigz si está disponible
+    USE_PYARROW: bool = True  # Usar PyArrow para parsing ultra-rápido
+    PYARROW_BATCH_SIZE: int = 50000  # Filas por batch en PyArrow
 
     # Configuración de Elasticsearch
     ES_BASE_URL: str | None = None      # URL del cluster de Elasticsearch

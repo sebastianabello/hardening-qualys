@@ -106,50 +106,41 @@ export default function App() {
       
       const clientName = selectedClient?.name || "DEFAULT"
       
-      // Usar procesamiento asíncrono si hay muchos archivos (más de 5 para pruebas)
-      if (selected.length > 5) {
-        console.log(`🚀 Iniciando procesamiento asíncrono para ${selected.length} archivos`)
-        setNotice("Iniciando procesamiento asíncrono...")
-        
-        // Iniciar job asíncrono
-        console.log("📤 Enviando archivos al backend...")
-        const jobResponse = await processFilesAsync(selected, clientName, empresas, clientName)
-        console.log("✅ Job iniciado:", jobResponse)
-        
-        setJobId(jobResponse.job_id)
-        setNotice(`Procesamiento iniciado (Job: ${jobResponse.job_id})`)
-        
-        // Esperar completación con polling
-        console.log("🔄 Iniciando polling del job...")
-        const r = await waitForJobCompletion(
-          jobResponse.job_id,
-          (status) => {
-            // Actualizar progreso en tiempo real
-            console.log("📊 Actualización de progreso:", status)
-            setProgress(status.progress || "Procesando...")
-            setProgressDetails({
-              files_processed: status.files_processed,
-              total_files: status.total_files,
-              current_file: status.current_file
-            })
-          }
-        )
-        
-        console.log("🎉 Job completado:", r)
-        setResp(r)
-        const c = r.run?.counts || {}
-        const total = (c.t1_normal || 0) + (c.t1_ajustada || 0) + (c.t2_normal || 0) + (c.t2_ajustada || 0)
-        setNotice(`Procesamiento completado · ${r.run.source_files.length} archivo(s) · ${total} fila(s)`)
-        
-      } else {
-        // Usar procesamiento síncrono para pocos archivos
-        setNotice("Procesando archivos...")
-        const r = await processFiles(selected, clientName, empresas, clientName)
-        setResp(r)
-        const c = r.run?.counts || {}
-        const total = (c.t1_normal || 0) + (c.t1_ajustada || 0) + (c.t2_normal || 0) + (c.t2_ajustada || 0)
-        setNotice(`Procesamiento OK · ${r.run.source_files.length} archivo(s) · ${total} fila(s)`)
-      }
+      // SIEMPRE usar procesamiento asíncrono para evitar timeouts
+      console.log(`🚀 Iniciando procesamiento asíncrono para ${selected.length} archivos`)
+      setNotice("Iniciando procesamiento asíncrono...")
+      
+      // Iniciar job asíncrono
+      console.log("📤 Enviando archivos al backend...")
+      const jobResponse = await processFilesAsync(selected, clientName, empresas, clientName)
+      console.log("✅ Job iniciado:", jobResponse)
+      
+      setJobId(jobResponse.job_id)
+      setNotice(`Procesamiento iniciado (Job: ${jobResponse.job_id})`)
+      
+      // Esperar completación con polling más frecuente
+      console.log("🔄 Iniciando polling del job...")
+      const r = await waitForJobCompletion(
+        jobResponse.job_id,
+        (status) => {
+          // Actualizar progreso en tiempo real
+          console.log("📊 Actualización de progreso:", status)
+          setProgress(status.progress || "Procesando...")
+          setProgressDetails({
+            files_processed: status.files_processed,
+            total_files: status.total_files,
+            current_file: status.current_file
+          })
+        },
+        1000, // Polling cada 1 segundo (más responsivo)
+        3600  // 1 hora máximo (para archivos muy grandes)
+      )
+      
+      console.log("🎉 Job completado:", r)
+      setResp(r)
+      const c = r.run?.counts || {}
+      const total = (c.t1_normal || 0) + (c.t1_ajustada || 0) + (c.t2_normal || 0) + (c.t2_ajustada || 0)
+      setNotice(`Procesamiento completado · ${r.run.source_files.length} archivo(s) · ${total} fila(s)`)
       
     } catch (e: any) {
       setError(e?.message || String(e))

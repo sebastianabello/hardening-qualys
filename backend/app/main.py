@@ -27,6 +27,7 @@ from .ingest import ingest_run_folder
 from .parser_stream import stream_tables
 from .csv_stream import CsvAggregator
 from .models import JobStatus, ProcessJob
+from .parallel_processor import ParallelCsvProcessor
 
 # Job storage en memoria (en producción usar Redis o DB)
 active_jobs: Dict[str, ProcessJob] = {}
@@ -84,10 +85,11 @@ async def process_files_background(job_id: str, files_data: List[tuple], client:
 
         run = RunInfo(run_id=run_id, client=client, source_files=[], counts={})
         
-        # Guardar archivos subidos
+        # Guardar archivos subidos (optimizado con buffer)
         saved_csvs: List[Path] = []
         job.total_files = len(files_data)
         
+        logger.info(f"💾 Guardando {len(files_data)} archivos...")
         for i, (filename, content) in enumerate(files_data):
             job.current_file = filename
             job.files_processed = i
@@ -96,8 +98,8 @@ async def process_files_background(job_id: str, files_data: List[tuple], client:
             run.source_files.append(filename)
             dest = run_dir_upload / filename
             
-            # Guardar contenido del archivo
-            with dest.open("wb") as f:
+            # Guardar contenido del archivo con buffer grande
+            with dest.open("wb", buffering=settings.WRITE_BUFFER_SIZE) as f:
                 f.write(content)
             
             if filename.lower().endswith(".zip"):
@@ -109,53 +111,34 @@ async def process_files_background(job_id: str, files_data: List[tuple], client:
             elif filename.lower().endswith(".csv"):
                 saved_csvs.append(dest)
 
-        # Procesar CSVs
-        agg = CsvAggregator(cliente=client, out_dir=run_dir_output)
-        warnings = []
-        
-        total_csvs = len(saved_csvs)
-        
-        for i, csv_path in enumerate(saved_csvs):
-            job.current_file = csv_path.name
-            job.files_processed = len(files_data) + i
-            job.total_files = len(files_data) + total_csvs
-            job.progress = f"Procesando CSV {i+1}/{total_csvs}: {csv_path.name}"
-            
-            try:
-                saw_t1 = saw_t2 = False
-                rows_processed = 0
-                
-                for table, es_aj, row, cols, os_name in stream_tables(csv_path, empresas_list, nombre_defecto or client):
-                    if table == "t1": saw_t1 = True
-                    if table == "t2": saw_t2 = True
-                    agg.add_row(table, es_aj, row, cols, os_name)
-                    rows_processed += 1
-                    
-                    # Actualizar progreso cada 5000 filas
-                    if rows_processed % 5000 == 0:
-                        job.progress = f"Procesando {csv_path.name}: {rows_processed:,} filas"
-                
-                if not saw_t1:
-                    warnings.append(f"{csv_path.name}: 'Control Statistics' no encontrada o vacía")
-                if not saw_t2:
-                    warnings.append(f"{csv_path.name}: 'RESULTS' no encontrada o vacía")
-                    
-            except Exception as ex:
-                logger.error(f"❌ Error procesando {csv_path.name}: {ex}")
-                warnings.append(f"{csv_path.name}: error de parseo: {ex}")
+        logger.info(f"✅ {len(saved_csvs)} archivos CSV listos para procesar")
 
-        # Finalizar
-        job.progress = "Generando archivos finales..."
-        nombres = agg.close()
+        # Usar procesador optimizado (paralelo o secuencial según tamaño)
+        processor = ParallelCsvProcessor(cliente=client, out_dir=run_dir_output)
         
+        def update_progress(filename: str, rows: int, total_files: int):
+            """Callback para actualizar progreso durante procesamiento"""
+            job.current_file = filename
+            if rows > 0:
+                job.progress = f"Procesando {filename}: {rows:,} filas"
+        
+        nombres, warnings, counts = processor.process_csvs_parallel(
+            saved_csvs, 
+            empresas_list, 
+            nombre_defecto or client,
+            progress_callback=update_progress
+        )
+        
+        run.counts = counts
+        preview = processor.aggregator.preview
+        
+        # Generar artifacts
+        job.progress = "Generando artifacts..."
         artifacts = []
         for n in nombres:
             p = run_dir_output / n
             artifacts.append(Artifact(name=n, size=p.stat().st_size if p.exists() else 0,
                                       download_url=f"/api/runs/{run_id}/artifact/{n}"))
-        
-        run.counts = agg.counts
-        preview = agg.preview
 
         # Guardar manifest
         (run_dir / "manifest.json").write_text(json.dumps({
@@ -169,7 +152,9 @@ async def process_files_background(job_id: str, files_data: List[tuple], client:
         job.result = result
         job.status = JobStatus.COMPLETED
         job.end_time = datetime.now()
-        job.progress = f"✅ Completado: {len(artifacts)} archivos generados"
+        elapsed = (job.end_time - job.start_time).total_seconds()
+        job.progress = f"✅ Completado en {elapsed:.1f}s: {len(artifacts)} archivos generados"
+        logger.info(f"🎉 Job {job_id} completado en {elapsed:.1f}s")
         
     except Exception as e:
         logger.error(f"❌ Error en job {job_id}: {str(e)}")

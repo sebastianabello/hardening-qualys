@@ -86,19 +86,27 @@ export async function getJobStatus(jobId: string): Promise<{
 export async function waitForJobCompletion(
   jobId: string,
   onProgress?: (status: any) => void,
-  pollInterval: number = 2000,
-  maxAttempts: number = 900 // 30 minutos máximo con polling cada 2 segundos
+  pollInterval: number = 1000,  // 1 segundo por defecto (más responsivo)
+  maxAttempts: number = 3600     // 1 hora máximo para archivos muy grandes
 ): Promise<ProcessResponse> {
   return new Promise((resolve, reject) => {
     let attempts = 0
+    let consecutiveErrors = 0
+    const maxConsecutiveErrors = 5
     
     const poll = async () => {
       try {
         attempts++
-        console.log(`[Job ${jobId}] Intento ${attempts}/${maxAttempts} - Consultando estado...`)
+        
+        // Log menos verboso para no saturar la consola
+        if (attempts % 10 === 1) { // Solo cada 10 intentos
+          console.log(`[Job ${jobId}] Intento ${attempts}/${maxAttempts} - Consultando estado...`)
+        }
         
         const status = await getJobStatus(jobId)
-        console.log(`[Job ${jobId}] Estado:`, status.status, `- Progreso:`, status.progress)
+        
+        // Resetear contador de errores en caso de éxito
+        consecutiveErrors = 0
         
         if (onProgress) {
           onProgress(status)
@@ -119,20 +127,26 @@ export async function waitForJobCompletion(
           reject(new Error(`Timeout: Job no completó en ${Math.round(maxAttempts * pollInterval / 60000)} minutos`))
         } else {
           // Job aún en progreso, continuar polling
-          console.log(`[Job ${jobId}] 🔄 Continuando polling en ${pollInterval}ms...`)
           setTimeout(poll, pollInterval)
         }
       } catch (error) {
-        console.error(`[Job ${jobId}] ❌ Error en polling:`, error)
+        consecutiveErrors++
+        
+        console.error(`[Job ${jobId}] ❌ Error en polling (${consecutiveErrors}/${maxConsecutiveErrors}):`, error)
         
         // Si el job se perdió por reinicio del servidor
         if (error.message.includes("Job perdido")) {
           console.log(`[Job ${jobId}] 🔄 Job perdido por reinicio del servidor`)
           reject(new Error("El servidor se reinició y perdió el estado del procesamiento. Intenta procesar de nuevo."))
         }
-        // Si es un error de red, intentar de nuevo hasta cierto límite
+        // Si hay demasiados errores consecutivos, fallar
+        else if (consecutiveErrors >= maxConsecutiveErrors) {
+          console.log(`[Job ${jobId}] ❌ Demasiados errores consecutivos (${consecutiveErrors})`)
+          reject(new Error(`Error de red persistente después de ${consecutiveErrors} intentos: ${error.message}`))
+        }
+        // Si es un error de red y no hemos alcanzado el límite, intentar de nuevo
         else if (attempts < maxAttempts && (error instanceof TypeError || error.message.includes('fetch'))) {
-          console.log(`[Job ${jobId}] 🔄 Reintentando por error de red...`)
+          console.log(`[Job ${jobId}] 🔄 Reintentando por error de red... (intento ${consecutiveErrors})`)
           setTimeout(poll, pollInterval * 2) // Doblar el intervalo en caso de error
         } else {
           reject(error)
